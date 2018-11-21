@@ -1,36 +1,40 @@
-
 #include <stdio.h>
 #include <stdlib.h>
 #include <pthread.h>
+#include <termios.h>
 
-typedef char * renderedImage; //Most likely byte stream for rendered image
 
-typedef struct Nodes {
-	renderedImage node1;
-	renderedImage node2;
-} Nodes;
+typedef char * RenderedImage; //Data of image to be rendered, this type might change
+static int N = 20; //Size of command buffer
+
+typedef struct RawImages
+{
+	//array of file paths
+	int currentFile;
+	int arraySize;
+}RawImages;
 
 typedef struct RenderedImages
 {
-	Nodes nodes;
-	int newData;
-	pthread_mutex_t node_mutex;
-	pthread_cond_t node_cond;
+	RenderedImage node1;
+	RenderedImage node2;
 } RenderedImages;
 
-typedef struct State
+typedef struct CommandBuffer
 {
-	int parallelState;
-	int newData;
-	pthread_mutex_t state_mutex;
-	pthread_cond_t state_cond;
+	char * command;
+	int read;
+    int write;
+    int count;
+    pthread_mutex_t buffer_mutex;
+    pthread_cond_t buffer_cond;
+} CommandBuffer;
 
-} State;
-
-typedef struct Images
+typedef struct ThreadData
 {
-	//Contains references to all the images in a circular format and what image we are currently on
-} Images;
+	RawImages images;
+	CommandBuffer buffer;
+} ThreadData;
 
 // Read in the next image button
 //If button pressed, get image, load next image into shared data structure
@@ -48,43 +52,54 @@ static void * shiftOrientationButton(void * bufferArg) {
 
 }
 
-//When orientation shifts or next image pressed, render image and flag to be sent
-static void * downSampleImage(void * bufferArg) {
-	//Waits for a layout chagne or a new image to come in
-}
-
-//Sends data to nodes after new data has been rendered or Orientation to shift
-static void * sendData(void * bufferArg) {
+int main (void) {
+	RawImages imagePaths;
+	loadInImages(&imagePaths);
 
 }
 
-int main(void) {
-	pthread_t next, parallelSerial, shift, downSample, send;
-
-	State myState;
-	state_init(&myState);
-	Images myImages;
-	init_images(&myImages);
-	RenderedImages myRenderedImages;
-	init_renderedImages(&myRenderedImages);
-
+//Looks into directory and loads image file paths into Raw Images
+void loadInImages(RawImages *r) {
+	//doAction
+	r-> arraySize = 0; //Change this to number of files in directory
+	r->currentFile = 0;
 
 }
 
-void state_init (State *state) {
-	state->parallelState = 0;
-	state->newData = 0;
-	pthread_mutex_init(& (state->state_mutex), NULL);
-	pthread_cond_init(& (state->state_cond), NULL);
+void commandBuffer_init(CommandBuffer *b) {
+	b->command = (malloc (N*sizeof (char)));
+	b-> read = 0;
+	b->write = 0;
+	b->count = 0;
+	pthread_mutex_init(&(b->buffer_mutex),NULL);
+	pthread_cond_init (&(b->buffer_cond), NULL);
+
 }
 
-void init_images(Images * images) {
-	//Read in from folder with image and create a circuilar buffer will all image names.
-	//Set the current image as the first one in the buffer
+void enqueue (CommandBuffer *b, char command) {
+    pthread_mutex_lock (&(b->buffer_mutex));
+    while (b->count >= N) {
+        pthread_cond_wait (&(b->buffer_cond), &(b->buffer_mutex));
+    }
+    b->command[b->write] = command;
+    b->count++;
+    b->write = (b->write + 1) % N;
+    pthread_cond_broadcast (&(b->buffer_cond));
+    pthread_mutex_unlock (&(b->buffer_mutex));
 }
 
-void init_renderedImages(RenderedImages * renderedImages) {
-	renderedImages->newData = 0;
-	pthread_mutex_init(& (renderedImages->node_mutex), NULL);
-	pthread_cond_init(& (renderedImages->node_cond), NULL);
+void dequeue (CommandBuffer *b, char *command) {
+    pthread_mutex_lock (&(b->buffer_mutex));
+
+    while ((b->count) == 0) {
+        pthread_cond_wait (&(b->buffer_cond), &(b->buffer_mutex));
+    }
+
+    *command = (b->command[(b->read)]);
+
+    b->read = (b->read + 1) % N;
+    b->count--;
+    pthread_cond_broadcast (&(b->buffer_cond));
+    pthread_mutex_unlock (&(b->buffer_mutex));
+
 }
