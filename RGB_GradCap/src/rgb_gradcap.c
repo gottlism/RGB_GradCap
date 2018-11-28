@@ -2,17 +2,34 @@
 #include <stdlib.h>
 #include <pthread.h>
 #include <termios.h>
+#include <unistd.h>
+#include <sys/wait.h>
+#include <sys/time.h>
 
+#include "libsoc_pwm.h"
+#include "libsoc_gpio.h"
+#include "libsoc_debug.h"
 
-typedef char * RenderedImage; //Data of image to be rendered, this type might change
+typedef FILE * RenderedImage; //Data of image to be rendered, this type might change
 static int N = 20; //Size of command buffer
+static int NIPIN = 20;
+static int SCPIN = 21;
+static int SOPIN = 22;
+static int parallelState = 0;
+static pthread_t nextImage,
+				 stateChange,
+				 orientationShift,
+				 readCommands,
+				 nextImage,
+				 stateChange,
+				 shiftOrientation;
 
 typedef struct RawImages
 {
-	//array of file paths
+	char ** filePaths;
 	int currentFile;
 	int arraySize;
-}RawImages;
+} RawImages;
 
 typedef struct RenderedImages
 {
@@ -32,29 +49,164 @@ typedef struct CommandBuffer
 
 typedef struct ThreadData
 {
-	RawImages images;
-	CommandBuffer buffer;
+	RawImages * rawImages;
+	RenderedImages * renderedImages;
+	CommandBuffer * buffer;
 } ThreadData;
+
+static void * nextImageButton(void * bufferArg) {
+  gpio * pin;
+  pin = libsoc_gpio_request(NIPIN, LS_GPIO_SHARED);
+  libsoc_gpio_set_direction(pin, INPUT);
+  int t;
+  int level;
+  level = 0;
+  int prev_level;
+  prev_level = 0;
+  while(1) {
+      level = libsoc_gpio_get_level(pin);
+      if(level==0 && prev_level == 1) {
+          t++;
+          enqueue((struct CommandBuffer *)bufferArg, "next image");
+          // printf("%s\n", "next image pressed");
+      }
+      prev_level = level;
+      //printf("%d\n", level);
+      usleep(100);
+  }
+  libsoc_gpio_free(pin);
+}
+
+static void * stateChangeButton(void * bufferArg) {
+	gpio * pin;
+	pin = libsoc_gpio_request(SCPIN, LS_GPIO_SHARED);
+	libsoc_gpio_set_direction(pin, INPUT);
+	int t;
+	int level;
+	level = 0;
+	int prev_level;
+	prev_level = 0;
+	while(1) {
+			level = libsoc_gpio_get_level(pin);
+			if(level==0 && prev_level == 1) {
+					t++;
+					enqueue((struct CommandBuffer *)bufferArg, "state change");
+					// printf("%s\n", "state change pressed");
+			}
+			prev_level = level;
+			//printf("%d\n", level);
+			usleep(100);
+	}
+	libsoc_gpio_free(pin);
+}
+
+static void * shiftOrientationButton(void * bufferArg) {
+	gpio * pin;
+  pin = libsoc_gpio_request(SOPIN, LS_GPIO_SHARED);
+  libsoc_gpio_set_direction(pin, INPUT);
+  int t;
+  int level;
+  level = 0;
+  int prev_level;
+  prev_level = 0;
+  while(1) {
+      level = libsoc_gpio_get_level(pin);
+      if(level==0 && prev_level == 1) {
+          t++;
+          enqueue((struct CommandBuffer *)bufferArg, "orientation shift");
+          // printf("%s\n", "shift orientation pressed");
+      }
+      prev_level = level;
+      //printf("%d\n", level);
+      usleep(100);
+  }
+  libsoc_gpio_free(pin);
+}
 
 // Read in the next image button
 //If button pressed, get image, load next image into shared data structure
-static void * nextImageButton(void * bufferArg) {
-
+static void * nextImageThread(void * rawImagePaths) {
+	struct RawImages * tempRawImages = (struct RawImages *)rawImagePaths;
+	tempRawImages->currentFile++;
+	if (tempRawImages->currentFile == tempRawImages->arraySize) {
+		tempRawImages->currentFile = 0;
+	}
+	char * curImage = tempRawImages->filePaths[tempRawImages->currentFile];
+	//Downsample curImage
+	//Send nodes ( ͡° ͜ʖ ͡°)
 }
 
 //Change state to opposite and flag a rerender
-static void * parallelSerialButton(void * bufferArg) {
-
+static void * parallelSerialThread(void * rawImagePaths) {
+	!parallelState;
+	//Downsample the current image
+	//Send nodes ( ͡° ͜ʖ ͡°)
 }
 
 // Shift orientation and flag to be sent
-static void * shiftOrientationButton(void * bufferArg) {
+static void * shiftOrientationThread(void * renderedImages) {
+	struct RenderedImages * tempRenderedImages = (struct RenderedImages *)renderedImages;
+	//how do we get the renderedimages/nodes in here
+	//Swap the nodes below
+	FILE temp = *(tempRenderedImages->node1);
+	*(tempRenderedImages->node1) = *(tempRenderedImages->node2);
+	*(tempRenderedImages->node2) = temp;
+	//Send nodes ( ͡° ͜ʖ ͡°)
+}
 
+//Read button input
+static void * readCommandsThread(void * dataPack) {
+	struct ThreadData * tempDataPack = (struct ThreadData *)dataPack;
+	char * cmd;
+	while (1) {
+		pthread_mutex_lock (&(tempDataPack->buffer->buffer_mutex));
+		if (tempDataPack->buffer->count == 0) {
+			pthread_cond_wait (&(tempDataPack->buffer->buffer_cond), &(tempDataPack->buffer->buffer_mutex));
+		}
+		dequeue(tempDataPack->buffer, cmd);
+		pthread_cond_broadcast (&(tempDataPack->buffer->buffer_cond));
+		pthread_mutex_unlock (&(tempDataPack->buffer->buffer_mutex));
+
+		if (strcmp(cmd, "next image") == 0) {
+			pthread_create(&nextImage, (pthread_attr_t*)0, nextImageThread, &(tempDataPack->rawImages));
+			pthread_join(nextImageThread, 0);
+			//kill next image thread
+		}
+
+		else if (strcmp(cmd, "state change") == 0) {
+			pthread_create(&stateChange, (pthread_attr_t*)0, parallelSerialThread, &(tempDataPack->rawImages));
+			pthread_join(parallelSerialThread, 0);
+			//kill parallel serial thread
+		}
+
+		else if (strcmp(cmd, "orientation shift") == 0) {
+			pthread_create(&orientationShift, (pthread_attr_t*)0, shiftOrientationThread, &(tempDataPack->renderedImages));
+			pthread_join(shiftOrientationThread, 0);
+			//kill orientation shift thread
+		}
+	}
 }
 
 int main (void) {
-	RawImages imagePaths;
+	struct RawImages * imagePaths;
 	loadInImages(&imagePaths);
+	struct CommandBuffer * cmdBuf;
+	struct RenderedImages * rendered;
+
+	struct ThreadData * dataPack;
+	dataPack->renderedImages = rendered;
+	dataPack->rawImages = imagePaths;
+	dataPack->buffer = cmdBuf;
+
+	pthread_create(&nextImage, (pthread_attr_t*)0, nextImageButton, &(dataPack->buffer));
+	pthread_create(&stateChange, (pthread_attr_t*)0, stateChangeButton, &(dataPack->buffer));
+	pthread_create(&shiftOrientation, (pthread_attr_t*)0, shiftOrientationButton, &(dataPack->buffer));
+	pthread_create(&readCommands, (pthread_attr_t*)0, readCommandsThread, &dataPack);
+
+	pthread_join(nextImage, 0);
+	pthread_join(stateChange, 0);
+	pthread_join(shiftOrientation, 0);
+	pthread_join(readCommands, 0);
 
 }
 
