@@ -16,13 +16,7 @@ static int NIPIN = 20;
 static int SCPIN = 21;
 static int SOPIN = 22;
 static int parallelState = 0;
-static pthread_t nextImage,
-				 stateChange,
-				 orientationShift,
-				 readCommands,
-				 nextImage,
-				 stateChange,
-				 shiftOrientation;
+static pthread_t readCommands, nextImageT, stateChangeT, shiftOrientationT;
 
 typedef struct RawImages
 {
@@ -123,37 +117,6 @@ static void * shiftOrientationButton(void * bufferArg) {
   libsoc_gpio_free(pin);
 }
 
-// Read in the next image button
-//If button pressed, get image, load next image into shared data structure
-static void * nextImageThread(void * rawImagePaths) {
-	struct RawImages * tempRawImages = (struct RawImages *)rawImagePaths;
-	tempRawImages->currentFile++;
-	if (tempRawImages->currentFile == tempRawImages->arraySize) {
-		tempRawImages->currentFile = 0;
-	}
-	char * curImage = tempRawImages->filePaths[tempRawImages->currentFile];
-	//Downsample curImage
-	//Send nodes ( ͡° ͜ʖ ͡°)
-}
-
-//Change state to opposite and flag a rerender
-static void * parallelSerialThread(void * rawImagePaths) {
-	!parallelState;
-	//Downsample the current image
-	//Send nodes ( ͡° ͜ʖ ͡°)
-}
-
-// Shift orientation and flag to be sent
-static void * shiftOrientationThread(void * renderedImages) {
-	struct RenderedImages * tempRenderedImages = (struct RenderedImages *)renderedImages;
-	//how do we get the renderedimages/nodes in here
-	//Swap the nodes below
-	FILE temp = *(tempRenderedImages->node1);
-	*(tempRenderedImages->node1) = *(tempRenderedImages->node2);
-	*(tempRenderedImages->node2) = temp;
-	//Send nodes ( ͡° ͜ʖ ͡°)
-}
-
 //Read button input
 static void * readCommandsThread(void * dataPack) {
 	struct ThreadData * tempDataPack = (struct ThreadData *)dataPack;
@@ -168,21 +131,15 @@ static void * readCommandsThread(void * dataPack) {
 		pthread_mutex_unlock (&(tempDataPack->buffer->buffer_mutex));
 
 		if (strcmp(cmd, "next image") == 0) {
-			pthread_create(&nextImage, (pthread_attr_t*)0, nextImageThread, &(tempDataPack->rawImages));
-			pthread_join(nextImageThread, 0);
-			//kill next image thread
+			nextImage(&(tempDataPack->rawImages));
 		}
 
 		else if (strcmp(cmd, "state change") == 0) {
-			pthread_create(&stateChange, (pthread_attr_t*)0, parallelSerialThread, &(tempDataPack->rawImages));
-			pthread_join(parallelSerialThread, 0);
-			//kill parallel serial thread
+			changeState(&(tempDataPack->rawImages));
 		}
 
 		else if (strcmp(cmd, "orientation shift") == 0) {
-			pthread_create(&orientationShift, (pthread_attr_t*)0, shiftOrientationThread, &(tempDataPack->renderedImages));
-			pthread_join(shiftOrientationThread, 0);
-			//kill orientation shift thread
+			shiftOrientation(&(tempDataPack->rawImages));
 		}
 	}
 }
@@ -198,14 +155,14 @@ int main (void) {
 	dataPack->rawImages = imagePaths;
 	dataPack->buffer = cmdBuf;
 
-	pthread_create(&nextImage, (pthread_attr_t*)0, nextImageButton, &(dataPack->buffer));
-	pthread_create(&stateChange, (pthread_attr_t*)0, stateChangeButton, &(dataPack->buffer));
-	pthread_create(&shiftOrientation, (pthread_attr_t*)0, shiftOrientationButton, &(dataPack->buffer));
+	pthread_create(&nextImageT, (pthread_attr_t*)0, nextImageButton, &(dataPack->buffer));
+	pthread_create(&stateChangeT, (pthread_attr_t*)0, stateChangeButton, &(dataPack->buffer));
+	pthread_create(&shiftOrientationT, (pthread_attr_t*)0, shiftOrientationButton, &(dataPack->buffer));
 	pthread_create(&readCommands, (pthread_attr_t*)0, readCommandsThread, &dataPack);
 
-	pthread_join(nextImage, 0);
-	pthread_join(stateChange, 0);
-	pthread_join(shiftOrientation, 0);
+	pthread_join(nextImageT, 0);
+	pthread_join(stateChangeT, 0);
+	pthread_join(shiftOrientationT, 0);
 	pthread_join(readCommands, 0);
 
 }
@@ -254,4 +211,31 @@ void dequeue (CommandBuffer *b, char *command) {
     pthread_cond_broadcast (&(b->buffer_cond));
     pthread_mutex_unlock (&(b->buffer_mutex));
 
+}
+
+void nextImage(void * rawImagePaths) {
+	struct RawImages * tempRawImages = (struct RawImages *)rawImagePaths;
+	tempRawImages->currentFile++;
+	if (tempRawImages->currentFile == tempRawImages->arraySize) {
+		tempRawImages->currentFile = 0;
+	}
+	char * curImage = tempRawImages->filePaths[tempRawImages->currentFile];
+	//Downsample curImage
+	//Send nodes ( ͡° ͜ʖ ͡°)
+}
+
+void changeState(void * rawImagePaths) {
+	!parallelState;
+	//Downsample the current image
+	//Send nodes ( ͡° ͜ʖ ͡°)
+}
+
+void shiftOrientation(void * renderedImages) {
+	struct RenderedImages * tempRenderedImages = (struct RenderedImages *)renderedImages;
+	//how do we get the renderedimages/nodes in here
+	//Swap the nodes below
+	FILE temp = *(tempRenderedImages->node1);
+	*(tempRenderedImages->node1) = *(tempRenderedImages->node2);
+	*(tempRenderedImages->node2) = temp;
+	//Send nodes ( ͡° ͜ʖ ͡°)
 }
